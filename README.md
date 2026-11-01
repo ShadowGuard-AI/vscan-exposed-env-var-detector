@@ -7,6 +7,8 @@ Detects potentially sensitive environment variables exposed in web application r
 ## Usage
 `./vscan-exposed-env-var-detector [params]`
 
+Findings report the pattern kind and the variable name only. Matched values are shown as [MASKED] in the printed results and in the output file, and are never saved in clear. An invalid URL or a failed fetch prints a failure line and exits with status 1.
+
 ## Parameters
 - `-h`: Show help message and exit
 - `-o`: Output file to save results to.

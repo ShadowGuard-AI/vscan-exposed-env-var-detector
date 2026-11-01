@@ -4,6 +4,7 @@ import re
 import logging
 from bs4 import BeautifulSoup
 import os
+import sys
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -73,18 +74,19 @@ def analyze_content(content):
         "Secret Key": r"(SECRET_KEY|SECRETKEY|secret_key|secretkey)\s*[:=]\s*['\"]?([A-Za-z0-9_-]+)['\"]?",
         "Password": r"(PASSWORD|PASSWORD|password|passwd)\s*[:=]\s*['\"]?([A-Za-z0-9_-]+)['\"]?",
         "Database URL": r"(DATABASE_URL|DATABASEURL|database_url|databaseurl)\s*[:=]\s*['\"]?([A-Za-z0-9_:\/\.@-]+)['\"]?",
-        "AWS Key": r"(AWS_ACCESS_KEY_ID|AWS_SECRET_ACCESS_KEY)\s*[:=]\s*['\"]?([A-Za-z0-9_\/-+=]+)['\"]?",
+        "AWS Key": r"(AWS_ACCESS_KEY_ID|AWS_SECRET_ACCESS_KEY)\s*[:=]\s*['\"]?([A-Za-z0-9_/+=-]+)['\"]?",
         "JWT Secret": r"(JWT_SECRET|JWTSECRET|jwt_secret|jwtsecret)\s*[:=]\s*['\"]?([A-Za-z0-9_-]+)['\"]?"
     }
 
     detected_vars = []
     for name, pattern in patterns.items():
-        matches = re.findall(pattern, content)
+        compiled = re.compile(pattern)
+        matches = compiled.findall(content)
         for match in matches:
-            if len(match) > 1:  # Ensure capture group exists (the value)
-                detected_vars.append(f"{name}: {match[1]}")
+            if len(match) > 1:  # First group is the variable name, second is the value
+                detected_vars.append(f"{name}: {match[0]}: [MASKED]")
             else:
-                detected_vars.append(f"{name}: {match[0]}") # Handle cases with no explicit value
+                detected_vars.append(f"{name}: {match[0]}: [MASKED]")
 
     return detected_vars
 
@@ -120,12 +122,14 @@ def main():
     # Validate URL
     if not is_valid_url(url):
         logging.error("Invalid URL provided.")
-        return
+        print("Failed to scan: invalid URL provided.")
+        sys.exit(1)
 
     # Fetch the content of the URL
     content = fetch_url(url)
     if content is None:
-        return
+        print(f"Failed to fetch {url}. No content was received, so no scan was performed.")
+        sys.exit(1)
 
     # Analyze the content for potential environment variables
     detected_vars = analyze_content(content)
