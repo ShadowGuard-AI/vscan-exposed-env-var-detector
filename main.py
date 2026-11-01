@@ -72,12 +72,18 @@ def analyze_content(content):
     patterns = {
         "API Key": r"(API_KEY|APIKEY|api_key|apikey)\s*[:=]\s*['\"]?([A-Za-z0-9_-]+)['\"]?",
         "Secret Key": r"(SECRET_KEY|SECRETKEY|secret_key|secretkey)\s*[:=]\s*['\"]?([A-Za-z0-9_-]+)['\"]?",
+        # The case variants are a fixed list in every pattern here.
+        # Title case spellings such as Password or Api_Key match
+        # nothing, so a page using those is reported clean.
         "Password": r"(PASSWORD|PASSWORD|password|passwd)\s*[:=]\s*['\"]?([A-Za-z0-9_-]+)['\"]?",
         "Database URL": r"(DATABASE_URL|DATABASEURL|database_url|databaseurl)\s*[:=]\s*['\"]?([A-Za-z0-9_:\/\.@-]+)['\"]?",
         "AWS Key": r"(AWS_ACCESS_KEY_ID|AWS_SECRET_ACCESS_KEY)\s*[:=]\s*['\"]?([A-Za-z0-9_/+=-]+)['\"]?",
         "JWT Secret": r"(JWT_SECRET|JWTSECRET|jwt_secret|jwtsecret)\s*[:=]\s*['\"]?([A-Za-z0-9_-]+)['\"]?"
     }
 
+    # There is no deduplication. A variable printed ten times in the
+    # page is reported ten times, and the count in the output is a
+    # count of matches, not of distinct variables exposed.
     detected_vars = []
     for name, pattern in patterns.items():
         compiled = re.compile(pattern)
@@ -125,6 +131,9 @@ def main():
         print("Failed to scan: invalid URL provided.")
         sys.exit(1)
 
+    # Only the one named page is ever fetched. Nothing is crawled and
+    # no linked script or config file is read, so the scan covers the
+    # text of a single response whatever the description implies.
     # Fetch the content of the URL
     content = fetch_url(url)
     if content is None:
