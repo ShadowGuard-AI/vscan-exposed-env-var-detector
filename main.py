@@ -2,8 +2,6 @@ import argparse
 import requests
 import re
 import logging
-from bs4 import BeautifulSoup
-import os
 import sys
 
 # Configure logging
@@ -30,7 +28,7 @@ def is_valid_url(url):
         bool: True if the URL is valid, False otherwise.
     """
     regex = re.compile(
-        r'^(?:http|ftp)s?://'  # http:// or https://
+        r'^https?://'  # http:// or https:// only: other schemes pass no fetch this tool can make
         r'(?:(?:[A-Z0-9](?:[A-Z0-9-]{0,61}[A-Z0-9])?\.)+(?:[A-Z]{2,6}\.?|[A-Z0-9-]{2,}\.?)|'  # domain...
         r'localhost|'  # localhost...
         r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})'  # ...or ip
@@ -51,7 +49,12 @@ def fetch_url(url):
     """
     try:
         response = requests.get(url, timeout=10)  # Added timeout to prevent indefinite hanging
-        response.raise_for_status()  # Raise HTTPError for bad responses (4xx or 5xx)
+        # An HTTP error status is not a fetch failure here: error pages
+        # and forbidden responses are exactly where exposed variables
+        # leak, so the body is returned for scanning whatever the status.
+        # None is reserved for a request that produced no response.
+        if response.status_code >= 400:
+            logging.warning(f"URL returned HTTP {response.status_code}; scanning the response body anyway.")
         return response.text
     except requests.exceptions.RequestException as e:
         logging.error(f"Error fetching URL: {e}")
@@ -68,31 +71,33 @@ def analyze_content(content):
     Returns:
         list: A list of detected potential environment variables.
     """
-    # Regular expressions for common environment variable patterns
+    # Regular expressions for common environment variable patterns.
+    # Patterns are compiled case-insensitively, so title case spellings
+    # such as Password or Api_Key match as well as the upper and lower
+    # case forms.
     patterns = {
-        "API Key": r"(API_KEY|APIKEY|api_key|apikey)\s*[:=]\s*['\"]?([A-Za-z0-9_-]+)['\"]?",
-        "Secret Key": r"(SECRET_KEY|SECRETKEY|secret_key|secretkey)\s*[:=]\s*['\"]?([A-Za-z0-9_-]+)['\"]?",
-        # The case variants are a fixed list in every pattern here.
-        # Title case spellings such as Password or Api_Key match
-        # nothing, so a page using those is reported clean.
-        "Password": r"(PASSWORD|PASSWORD|password|passwd)\s*[:=]\s*['\"]?([A-Za-z0-9_-]+)['\"]?",
-        "Database URL": r"(DATABASE_URL|DATABASEURL|database_url|databaseurl)\s*[:=]\s*['\"]?([A-Za-z0-9_:\/\.@-]+)['\"]?",
+        "API Key": r"(API_KEY|APIKEY)\s*[:=]\s*['\"]?([A-Za-z0-9_-]+)['\"]?",
+        "Secret Key": r"(SECRET_KEY|SECRETKEY)\s*[:=]\s*['\"]?([A-Za-z0-9_-]+)['\"]?",
+        "Password": r"(PASSWORD|PASSWD)\s*[:=]\s*['\"]?([A-Za-z0-9_-]+)['\"]?",
+        "Database URL": r"(DATABASE_URL|DATABASEURL)\s*[:=]\s*['\"]?([A-Za-z0-9_:\/\.@-]+)['\"]?",
         "AWS Key": r"(AWS_ACCESS_KEY_ID|AWS_SECRET_ACCESS_KEY)\s*[:=]\s*['\"]?([A-Za-z0-9_/+=-]+)['\"]?",
-        "JWT Secret": r"(JWT_SECRET|JWTSECRET|jwt_secret|jwtsecret)\s*[:=]\s*['\"]?([A-Za-z0-9_-]+)['\"]?"
+        "JWT Secret": r"(JWT_SECRET|JWTSECRET)\s*[:=]\s*['\"]?([A-Za-z0-9_-]+)['\"]?"
     }
 
-    # There is no deduplication. A variable printed ten times in the
-    # page is reported ten times, and the count in the output is a
-    # count of matches, not of distinct variables exposed.
+    # Results are deduplicated by pattern kind and variable name
+    # (case-insensitively), so a variable printed ten times in the page
+    # is reported once, with the first spelling seen.
     detected_vars = []
+    seen = set()
     for name, pattern in patterns.items():
-        compiled = re.compile(pattern)
+        compiled = re.compile(pattern, re.IGNORECASE)
         matches = compiled.findall(content)
         for match in matches:
-            if len(match) > 1:  # First group is the variable name, second is the value
-                detected_vars.append(f"{name}: {match[0]}: [MASKED]")
-            else:
-                detected_vars.append(f"{name}: {match[0]}: [MASKED]")
+            entry = f"{name}: {match[0]}: [MASKED]"
+            key = (name, match[0].lower())
+            if key not in seen:
+                seen.add(key)
+                detected_vars.append(entry)
 
     return detected_vars
 
